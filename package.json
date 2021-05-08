@@ -11,7 +11,6 @@
   },
   "author": "Serverless, Inc.",
   "license": "Apache",
-  "dependencies": {},
   "devDependencies": {
     "@serverless/platform-client": "^4.2.2",
     "aws-sdk": "^2.640.0",
@@ -22,6 +21,7 @@
     "eslint-plugin-import": "^2.18.0",
     "eslint-plugin-prettier": "^3.0.1",
     "jest": "^25.1.0",
-    "prettier": "^1.18.2"
+    "prettier": "^1.18.2",
+    "serverless": "^2.40.0"
   }
 }
