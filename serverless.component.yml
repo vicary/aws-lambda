@@ -1,10 +1,10 @@
-name: aws-lambda
+name: aws-lambda-patch
 version: 3.0.0
-author: eahefnawy
-org: serverlessinc
+author: vicary
+org: augusts
 description: Deploys an AWS Lambda Function
 keywords: aws, serverless, lambda, function, faas
-repo: https://github.com/serverless-components/aws-lambda
+repo: https://github.com/vicary/aws-lambda
 readme: ''
 license: MIT
 src: ./src
