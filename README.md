@@ -72,37 +72,47 @@ The `aws-lambda` component is a zero configuration component, meaning that it'll
 Here's a complete reference of the `serverless.yml` file for the `aws-lambda` component:
 
 ```yml
-component: aws-lambda            # (required) name of the component. In that case, it's aws-lambda.
-name: my-lambda                  # (required) name of your component instance.
-org: serverlessinc               # (optional) serverless dashboard org. default is the first org you created during signup.
-app: my-app                      # (optional) serverless dashboard app. default is the same as the name property.
-stage: dev                       # (optional) serverless dashboard stage. default is dev.
+component: aws-lambda # (required) name of the component. In that case, it's aws-lambda.
+name: my-lambda # (required) name of your component instance.
+org: serverlessinc # (optional) serverless dashboard org. default is the first org you created during signup.
+app: my-app # (optional) serverless dashboard app. default is the same as the name property.
+stage: dev # (optional) serverless dashboard stage. default is dev.
 
 inputs:
-  src: ./src                     # (optional) path to the source folder, relative to the cwd. default is a hello world function.
-  name: my-lambda                # (optional) the name of lambda function. default is an auto-generated name based on the instance name and stage above.
-  handler: index.handler         # (optional) lambda handler relative to the src input above. default is handler.handler.
-  memory: 512                    # (optional) lambda memory size.
-  timeout: 10                    # (optional) lambda timeout.
-  description: My Lambda.        # (optional) lambda description.
-  env:                           # (optional) env vars.
+  src: ./src # (optional) path to the source folder, relative to the cwd. default is a hello world function.
+  name: my-lambda # (optional) the name of lambda function. default is an auto-generated name based on the instance name and stage above.
+  handler: index.handler # (optional) lambda handler relative to the src input above. default is handler.handler.
+  memory: 512 # (optional) lambda memory size.
+  timeout: 10 # (optional) lambda timeout.
+  description: My Lambda. # (optional) lambda description.
+  env: # (optional) env vars.
     FOO: BAR
-  roleName: plain-name           # (optional) custom role name.
-  retry: 2                       # (optional) async retry configuration. default is 0.
-  layers:                        # (optional) lambda layers to add to this lambda function. default is an empty array.
+  roleName: plain-name # (optional) custom role name.
+  resourcePolicy: # (optional) Resource-based policy permission
+    - Effect: Allow
+      Principal: "*"
+      Action: execute-api:Invoke
+      Resource:
+        - execute-api:/*/*/*
+      Condition:
+        IpAddress:
+          aws:SourceIp:
+            - "123.123.123.123"
+  retry: 2 # (optional) async retry configuration. default is 0.
+  layers: # (optional) lambda layers to add to this lambda function. default is an empty array.
     - aws:layer:arn:1
     - aws:layer:arn:2
-  vpcConfig:                     # (optional) lambda vpc configuration. default is null.
-    securityGroupIds:            # (optional) lambda vpc security group ids.
+  vpcConfig: # (optional) lambda vpc configuration. default is null.
+    securityGroupIds: # (optional) lambda vpc security group ids.
       - xxx
       - xxx
-    subnetIds:                   # (optional) lambda vpc subnet ids.
+    subnetIds: # (optional) lambda vpc subnet ids.
       - xxx
       - xxx
-  region: us-east-2              # (optional) aws region to deploy to. default is us-east-1.
-  provisionedConcurrency: 1      # (optional) provisioned concurrency, default is 0.
+  region: us-east-2 # (optional) aws region to deploy to. default is us-east-1.
+  provisionedConcurrency: 1 # (optional) provisioned concurrency, default is 0.
   alias:
-    name: provisioned            # (optional) alias for provisioned concurrency config, default is "provisioned".
+    name: provisioned # (optional) alias for provisioned concurrency config, default is "provisioned".
 ```
 
 **Note:** Unlike the `src` input, the `handler` input is relative to the `src` input, not to the current working directory.
@@ -134,9 +144,11 @@ To digg even deeper, you can pass the `--debug` flag to view the state of your c
 ```
 $ serverless info --debug
 ```
+
 ### 7. Remove
 
 If you want to tear down your entire `aws-lambda` infrastructure that was created during deployment, just run the following command in the directory containing the `serverless.yml` file.
+
 ```
 $ serverless remove
 ```

@@ -1,24 +1,22 @@
-const https = require('https')
-const AWS = require('@serverless/aws-sdk-extra')
-const { equals, not, pick } = require('ramda')
-const { readFile } = require('fs-extra')
+const https = require("https");
+const AWS = require("@serverless/aws-sdk-extra");
+const { equals, not, pick } = require("ramda");
+const { readFile } = require("fs-extra");
 
-const agent = new https.Agent({
-  keepAlive: true
-})
+const agent = new https.Agent({ keepAlive: true });
 
 /**
  * Sleep
  * @param {*} wait
  */
-const sleep = async (wait) => new Promise((resolve) => setTimeout(() => resolve(), wait))
+const sleep = async (wait) => new Promise((resolve) => setTimeout(() => resolve(), wait));
 
 /**
  * Generate a random ID
  */
 const randomId = Math.random()
   .toString(36)
-  .substring(6)
+  .substring(6);
 
 /**
  * Get AWS SDK Clients
@@ -26,46 +24,61 @@ const randomId = Math.random()
  * @param {*} region
  */
 const getClients = (credentials = {}, region) => {
-  AWS.config.update({
-    httpOptions: {
-      agent
-    }
-  })
+  AWS.config.update({ httpOptions: { agent } });
 
-  const extras = new AWS.Extras({ credentials, region })
-  const iam = new AWS.IAM({ credentials, region })
-  const lambda = new AWS.Lambda({ credentials, region })
-  const sts = new AWS.STS({ credentials, region })
-  return { iam, lambda, extras, sts }
-}
+  return {
+    extras: new AWS.Extras({ credentials, region }),
+    iam: new AWS.IAM({ credentials, region }),
+    lambda: new AWS.Lambda({ credentials, region }),
+    sts: new AWS.STS({ credentials, region }),
+  };
+};
 
 /**
  * Prepare inputs
  * @param {*} inputs
  * @param {*} instance
  */
-const prepareInputs = (inputs, instance) => {
-  return {
-    name: inputs.name || instance.state.name || `${instance.name}-${instance.stage}-${randomId}`,
-    roleName: inputs.roleName,
-    description:
-      inputs.description ||
-      `An AWS Lambda function from the AWS Lambda Serverless Framework Component.  Name: "${instance.name}" Stage: "${instance.stage}"`,
-    memory: inputs.memory || 1028,
-    timeout: inputs.timeout || 10,
-    src: inputs.src || null,
-    handler: inputs.handler || 'handler.handler',
-    runtime: 'nodejs12.x',
-    env: inputs.env || {},
-    region: inputs.region || 'us-east-1',
-    layers: inputs.layers || [],
-    securityGroupIds: inputs.vpcConfig ? inputs.vpcConfig.securityGroupIds : false,
-    subnetIds: inputs.vpcConfig ? inputs.vpcConfig.subnetIds : false,
-    retry: inputs.retry || 0,
-    provisionedConcurrency: inputs.provisionedConcurrency || 0,
-    aliasName: (inputs.alias && inputs.alias.name) || 'provisioned'
-  }
-}
+const prepareInputs = (
+  {
+    alias: { name: aliasName = "provisioned" } = {},
+    env = {},
+    description = `An AWS Lambda function from the AWS Lambda Serverless Framework Component.  Name: "${instance.name}" Stage: "${instance.stage}"`,
+    handler = "handler.handler",
+    layers = [],
+    memory = 1028,
+    provisionedConcurrency = 0,
+    region = "us-east-1",
+    resourcePolicy,
+    retry = 0,
+    roleName,
+    runtime = "nodejs12.x",
+    src = null,
+    state: { name: stateName = `${instance.name}-${instance.stage}-${randomId}` },
+    name = stateName,
+    timeout = 10,
+    vpcConfig: { securityGroupIds = [], subnetIds = [] } = {},
+  },
+  instance,
+) => ({
+  name,
+  roleName,
+  description,
+  memory,
+  timeout,
+  src,
+  handler,
+  runtime,
+  env,
+  region,
+  layers,
+  securityGroupIds,
+  subnetIds,
+  resourcePolicy,
+  retry,
+  provisionedConcurrency,
+  aliasName,
+});
 
 /*
  * Ensure the provided IAM Role or default IAM Role exists
@@ -74,127 +87,123 @@ const prepareInputs = (inputs, instance) => {
  * @param ${object} inputs - the component inputs
  * @param ${object} clients - the aws clients object
  */
-const createOrUpdateFunctionRole = async (instance, inputs, clients) => {
+const createOrUpdateFunctionRole = async ({ state }, { name, resourcePolicy, roleName }, clients) => {
   // Verify existing role, either provided or the previously created default role...
-  if (inputs.roleName) {
-    console.log(
-      `Verifying the provided IAM Role with the name: ${inputs.roleName} in the inputs exists...`
-    )
+  if (roleName) {
+    console.log(`Verifying the provided IAM Role with the name: ${roleName} in the inputs exists...`);
 
-    const userRole = await clients.extras.getRole({ roleName: inputs.roleName })
-    const userRoleArn = userRole && userRole.Role && userRole.Role.Arn ? userRole.Role.Arn : null // Don't save user provided role to state, always reference it as an input, in case it changes
+    const userRole = await clients.extras.getRole({ roleName });
+    const userRoleArn = userRole && userRole.Role && userRole.Role.Arn ? userRole.Role.Arn : null; // Don't save user provided role to state, always reference it as an input, in case it changes
 
     // If user role exists, save it to state so it can be used for the create/update lambda logic later
     if (userRoleArn) {
-      console.log(`The provided IAM Role with the name: ${inputs.roleName} in the inputs exists.`)
-      instance.state.userRoleArn = userRoleArn
+      console.log(`The provided IAM Role with the name: ${roleName} in the inputs exists.`);
+      state.userRoleArn = userRoleArn;
 
       // Save AWS Account ID by fetching the role ID
       // TODO: This may not work with cross-account roles.
-      instance.state.awsAccountId = instance.state.userRoleArn.split(':')[4]
+      state.awsAccountId = state.userRoleArn.split(":")[4];
 
       // Be sure to delete defaultLambdaRoleArn data, if it exists
-      if (instance.state.defaultLambdaRoleArn) {
-        delete instance.state.defaultLambdaRoleArn
+      if (state.defaultLambdaRoleArn) {
+        delete state.defaultLambdaRoleArn;
       }
     } else {
-      throw new Error(`The provided IAM Role with the name: ${inputs.roleName} could not be found.`)
+      throw new Error(`The provided IAM Role with the name: ${roleName} could not be found.`);
     }
   } else {
     // Create a default role with basic Lambda permissions
 
-    const defaultLambdaRoleName = `${inputs.name}-lambda-role`
-    console.log(
-      `IAM Role not found.  Creating or updating a default role with the name: ${defaultLambdaRoleName}`
-    )
+    const defaultLambdaRoleName = `${name}-lambda-role`;
+    console.log(`IAM Role not found.  Creating or updating a default role with the name: ${defaultLambdaRoleName}`);
 
     const result = await clients.extras.deployRole({
       roleName: defaultLambdaRoleName,
-      service: ['lambda.amazonaws.com'],
-      policy: 'arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole'
-    })
+      service: ["lambda.amazonaws.com"],
+      policy: ["arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"],
+      // todo; add inline policy for VPC, such as CreateNetworkInterface... etc.
+      assumeRolePolicyDocument: resourcePolicy,
+    });
 
-    instance.state.defaultLambdaRoleName = defaultLambdaRoleName
-    instance.state.defaultLambdaRoleArn = result.roleArn
-    instance.state.awsAccountId = instance.state.defaultLambdaRoleArn.split(':')[4]
+    state.defaultLambdaRoleName = defaultLambdaRoleName;
+    state.defaultLambdaRoleArn = result.roleArn;
+    state.awsAccountId = state.defaultLambdaRoleArn.split(":")[4];
 
     // Be sure to delete userRole data, if it exists
-    if (instance.state.userRoleArn) {
-      delete instance.state.userRoleArn
+    if (state.userRoleArn) {
+      delete state.userRoleArn;
     }
 
-    console.log(
-      `Default Lambda IAM Role created or updated with ARN ${instance.state.defaultLambdaRoleArn}`
-    )
+    console.log(`Default Lambda IAM Role created or updated with ARN ${state.defaultLambdaRoleArn}`);
   }
-}
+};
 
 /*
  * Ensure the Meta IAM Role exists
  */
-const createOrUpdateMetaRole = async (instance, inputs, clients, serverlessAccountId) => {
+const createOrUpdateMetaRole = async ({ name, stage, state }, { monitoring = true }, clients, serverlessAccountId) => {
   // Create or update Meta Role for monitoring and more, if option is enabled.  It's enabled by default.
-  if (inputs.monitoring || typeof inputs.monitoring === 'undefined') {
-    console.log('Creating or updating the meta IAM Role...')
-
-    const roleName = `${instance.name}-meta-role`
-
-    const assumeRolePolicyDocument = {
-      Version: '2012-10-17',
-      Statement: {
-        Effect: 'Allow',
-        Principal: {
-          AWS: `arn:aws:iam::${serverlessAccountId}:root` // Serverless's Components account
-        },
-        Action: 'sts:AssumeRole'
-      }
-    }
-
-    // Create a policy that only can access APIGateway and Lambda metrics, logs from CloudWatch...
-    const policy = {
-      Version: '2012-10-17',
-      Statement: [
-        {
-          Effect: 'Allow',
-          Resource: '*',
-          Action: [
-            'cloudwatch:Describe*',
-            'cloudwatch:Get*',
-            'cloudwatch:List*',
-            'logs:Get*',
-            'logs:List*',
-            'logs:Describe*',
-            'logs:TestMetricFilter',
-            'logs:FilterLogEvents'
-          ]
-          // TODO: Finish this.  Haven't been able to get this to work.  Perhaps there is a missing service (Cloudfront?)
-          // Condition: {
-          //   StringEquals: {
-          //     'cloudwatch:namespace': [
-          //       'AWS/ApiGateway',
-          //       'AWS/Lambda'
-          //     ]
-          //   }
-          // }
-        }
-      ]
-    }
-
-    const roleDescription = `The Meta Role for the Serverless Framework App: ${instance.name} Stage: ${instance.stage}`
-
-    const result = await clients.extras.deployRole({
-      roleName,
-      roleDescription,
-      policy,
-      assumeRolePolicyDocument
-    })
-
-    instance.state.metaRoleName = roleName
-    instance.state.metaRoleArn = result.roleArn
-
-    console.log(`Meta IAM Role created or updated with ARN ${instance.state.metaRoleArn}`)
+  if (!monitoring) {
+    return;
   }
-}
+
+  console.log("Creating or updating the meta IAM Role...");
+
+  const roleName = `${name}-meta-role`;
+
+  const assumeRolePolicyDocument = {
+    Version: "2012-10-17",
+    Statement: {
+      Effect: "Allow",
+      Principal: {
+        AWS: `arn:aws:iam::${serverlessAccountId}:root`, // Serverless's Components account
+      },
+      Action: "sts:AssumeRole",
+    },
+  };
+
+  // Create a policy that only can access APIGateway and Lambda metrics, logs from CloudWatch...
+  const policy = {
+    Version: "2012-10-17",
+    Statement: [
+      {
+        Effect: "Allow",
+        Resource: "*",
+        Action: [
+          "cloudwatch:Describe*",
+          "cloudwatch:Get*",
+          "cloudwatch:List*",
+          "logs:Get*",
+          "logs:List*",
+          "logs:Describe*",
+          "logs:TestMetricFilter",
+          "logs:FilterLogEvents",
+        ],
+        // TODO: Finish this.  Haven't been able to get this to work.  Perhaps there is a missing service (Cloudfront?)
+        // Condition: {
+        //   StringEquals: {
+        //     'cloudwatch:namespace': [
+        //       'AWS/ApiGateway',
+        //       'AWS/Lambda'
+        //     ]
+        //   }
+        // }
+      },
+    ],
+  };
+
+  const result = await clients.extras.deployRole({
+    assumeRolePolicyDocument,
+    policy,
+    roleDescription: `The Meta Role for the Serverless Framework App: ${name} Stage: ${stage}`,
+    roleName,
+  });
+
+  state.metaRoleName = roleName;
+  state.metaRoleArn = result.roleArn;
+
+  console.log(`Meta IAM Role created or updated with ARN ${state.metaRoleArn}`);
+};
 
 /**
  * Create a new lambda function
@@ -204,7 +213,7 @@ const createOrUpdateMetaRole = async (instance, inputs, clients, serverlessAccou
 const createLambdaFunction = async (instance, lambda, inputs) => {
   const params = {
     FunctionName: inputs.name,
-    Code: {},
+    Code: { ZipFile: await readFile(inputs.src) },
     Description: inputs.description,
     Handler: inputs.handler,
     MemorySize: inputs.memory,
@@ -214,240 +223,222 @@ const createLambdaFunction = async (instance, lambda, inputs) => {
     Timeout: inputs.timeout,
     Layers: inputs.layers,
     Environment: {
-      Variables: inputs.env
+      Variables: inputs.env,
     },
-    ...(inputs.securityGroupIds && {
-      VpcConfig: {
-        SecurityGroupIds: inputs.securityGroupIds,
-        SubnetIds: inputs.subnetIds
-      }
-    })
-  }
-
-  params.Code.ZipFile = await readFile(inputs.src)
+    VpcConfig: {
+      SecurityGroupIds: inputs.securityGroupIds,
+      SubnetIds: inputs.subnetIds,
+    },
+  };
 
   try {
-    const res = await lambda.createFunction(params).promise()
-    return { arn: res.FunctionArn, hash: res.CodeSha256, version: res.Version }
+    const res = await lambda.createFunction(params).promise();
+    return { arn: res.FunctionArn, hash: res.CodeSha256, version: res.Version };
   } catch (e) {
     if (e.message.includes(`The role defined for the function cannot be assumed by Lambda`)) {
       // we need to wait after the role is created before it can be assumed
-      await sleep(5000)
-      return await createLambdaFunction(instance, lambda, inputs)
+      await sleep(5000);
+      return await createLambdaFunction(instance, lambda, inputs);
     }
-    throw e
+    throw e;
   }
-}
+};
 
 /**
  * Update Lambda configuration
  * @param {*} lambda
  * @param {*} config
  */
-const updateLambdaFunctionConfig = async (instance, lambda, inputs) => {
+const updateLambdaFunctionConfig = async (
+  { state: { defaultLambdaRoleArn, userRoleArn = defaultLambdaRoleArn } },
+  lambda,
+  { name, description, handler, memory, timeout, retry, runtime, layers, env, securityGroupIds, subnetIds },
+) => {
   const functionConfigParams = {
-    FunctionName: inputs.name,
-    Description: inputs.description,
-    Handler: inputs.handler,
-    MemorySize: inputs.memory,
-    Role: instance.state.userRoleArn || instance.state.defaultLambdaRoleArn,
-    Runtime: inputs.runtime,
-    Timeout: inputs.timeout,
-    Layers: inputs.layers,
-    Environment: {
-      Variables: inputs.env
+    FunctionName: name,
+    Description: description,
+    Handler: handler,
+    MemorySize: memory,
+    Role: userRoleArn,
+    Runtime: runtime,
+    Timeout: timeout,
+    Layers: layers,
+    Environment: { Variables: env },
+    VpcConfig: {
+      SecurityGroupIds: securityGroupIds,
+      SubnetIds: subnetIds,
     },
-    ...(inputs.securityGroupIds
-      ? {
-          VpcConfig: {
-            SecurityGroupIds: inputs.securityGroupIds,
-            SubnetIds: inputs.subnetIds
-          }
-        }
-      : {
-          VpcConfig: {
-            SecurityGroupIds: [],
-            SubnetIds: []
-          }
-        })
-  }
+  };
 
-  const res = await lambda.updateFunctionConfiguration(functionConfigParams).promise()
+  const res = await lambda.updateFunctionConfiguration(functionConfigParams).promise();
 
   // update retry config
   await lambda
     .putFunctionEventInvokeConfig({
-      FunctionName: inputs.name,
-      MaximumRetryAttempts: inputs.retry
+      FunctionName: name,
+      MaximumRetryAttempts: retry,
     })
-    .promise()
+    .promise();
 
-  return { arn: res.FunctionArn, hash: res.CodeSha256 }
-}
+  return { arn: res.FunctionArn, hash: res.CodeSha256 };
+};
 
 /**
  * Update Lambda function code
  * @param {*} lambda
  * @param {*} config
  */
-const updateLambdaFunctionCode = async (lambda, inputs) => {
+const updateLambdaFunctionCode = async (lambda, { name, src }) => {
   const functionCodeParams = {
-    FunctionName: inputs.name,
-    Publish: true
-  }
+    FunctionName: name,
+    Publish: true,
+    ZipFile: await readFile(src),
+  };
 
-  functionCodeParams.ZipFile = await readFile(inputs.src)
-  const res = await lambda.updateFunctionCode(functionCodeParams).promise()
+  const res = await lambda.updateFunctionCode(functionCodeParams).promise();
 
-  return { arn: res.FunctionArn, hash: res.CodeSha256, version: res.Version }
-}
+  return { arn: res.FunctionArn, hash: res.CodeSha256, version: res.Version };
+};
 
 /**
  * Get Lambda Alias
  * @param {*} lambda
  * @param {*} inputs
  */
-const getLambdaAlias = async (lambda, inputs) => {
+const getLambdaAlias = async (lambda, { aliasName, name }) => {
   try {
-    const res = await lambda
-      .getAlias({
-        FunctionName: inputs.name,
-        Name: inputs.aliasName
-      })
-      .promise()
+    const res = await lambda.getAlias({ FunctionName: name, Name: aliasName }).promise();
 
     return {
       name: res.Name,
       description: res.Description,
       arn: res.AliasArn,
       resourceId: res.ResourceId,
-      routingConfig: res.RoutingConfig
-    }
+      routingConfig: res.RoutingConfig,
+    };
   } catch (e) {
-    if (e.code === 'ResourceNotFoundException') {
-      return null
+    if (e.code === "ResourceNotFoundException") {
+      return null;
     }
-    throw e
+    throw e;
   }
-}
+};
 
 /**
  * Create a Lambda Alias
  * @param {*} lambda
  * @param {*} inputs
  */
-const createLambdaAlias = async (lambda, inputs) => {
+const createLambdaAlias = async (lambda, { aliasName, name, version }) => {
   const params = {
-    FunctionName: inputs.name,
-    FunctionVersion: inputs.version,
-    Name: inputs.aliasName
-  }
+    FunctionName: name,
+    FunctionVersion: version,
+    Name: aliasName,
+  };
 
-  const res = await lambda.createAlias(params).promise()
-  return { name: res.Name, arn: res.AliasArn }
-}
+  const res = await lambda.createAlias(params).promise();
+
+  return { name: res.Name, arn: res.AliasArn };
+};
 
 /**
  * Update a Lambda Alias
  * @param {*} lambda
  * @param {*} inputs
  */
-const updateLambdaAlias = async (lambda, inputs) => {
+const updateLambdaAlias = async (lambda, { aliasName, name, version }) => {
   const params = {
-    FunctionName: inputs.name,
-    FunctionVersion: inputs.version,
-    Name: inputs.aliasName
-  }
+    FunctionName: name,
+    FunctionVersion: version,
+    Name: aliasName,
+  };
 
-  const res = await lambda.updateAlias(params).promise()
-  return { name: res.Name, arn: res.AliasArn }
-}
+  const res = await lambda.updateAlias(params).promise();
+
+  return { name: res.Name, arn: res.AliasArn };
+};
 
 /**
  * Delete Lambda Alias, provisioned concurrency settings will be deleted together
  * @param {*} lambda
  * @param {*} inputs
  */
-const deleteLambdaAlias = async (lambda, inputs) => {
+const deleteLambdaAlias = async (lambda, { aliasName, name }) => {
   const params = {
-    FunctionName: inputs.name,
-    Name: inputs.aliasName
-  }
+    FunctionName: name,
+    Name: aliasName,
+  };
 
-  const res = await lambda.deleteAlias(params).promise()
-}
+  const res = await lambda.deleteAlias(params).promise();
+
+  return { name: res.Name, arn: res.AliasArn };
+};
 
 /**
  * Update provisioned concurrency configurations
  * @param {*} lambda
  * @param {*} inputs
  */
-const updateProvisionedConcurrencyConfig = async (lambda, inputs) => {
+const updateProvisionedConcurrencyConfig = async (lambda, { aliasName, name, provisionedConcurrency }) => {
   const params = {
-    FunctionName: inputs.name,
-    ProvisionedConcurrentExecutions: inputs.provisionedConcurrency,
-    Qualifier: inputs.aliasName
-  }
+    FunctionName: name,
+    ProvisionedConcurrentExecutions: provisionedConcurrency,
+    Qualifier: aliasName,
+  };
 
-  const res = await lambda.putProvisionedConcurrencyConfig(params).promise()
+  const res = await lambda.putProvisionedConcurrencyConfig(params).promise();
+
   return {
     allocated: res.AllocatedProvisionedConcurrentExecutions,
-    requested: res.RequestedProvisionedConcurrentExecutions
-  }
-}
+    requested: res.RequestedProvisionedConcurrentExecutions,
+  };
+};
 
 /**
  * Get Lambda Function
  * @param {*} lambda
  * @param {*} functionName
  */
-const getLambdaFunction = async (lambda, functionName) => {
+const getLambdaFunction = async (lambda, FunctionName) => {
   try {
-    const res = await lambda
-      .getFunctionConfiguration({
-        FunctionName: functionName
-      })
-      .promise()
+    const res = await lambda.getFunctionConfiguration({ FunctionName }).promise();
 
     return {
       name: res.FunctionName,
       description: res.Description,
       timeout: res.Timeout,
       runtime: res.Runtime,
-      role: {
-        arn: res.Role
-      },
+      role: { arn: res.Role },
       handler: res.Handler,
       memory: res.MemorySize,
       hash: res.CodeSha256,
-      env: res.Environment ? res.Environment.Variables : {},
+      env: res.Environment?.Variables ?? {},
       arn: res.FunctionArn,
-      securityGroupIds: res.VpcConfig ? res.VpcConfig.SecurityGroupIds : false,
-      subnetIds: res.VpcConfig ? res.VpcConfig.SubnetIds : false
-    }
+      securityGroupIds: res.VpcConfig?.SecurityGroupIds ?? [],
+      subnetIds: res.VpcConfig?.SubnetIds ?? [],
+    };
   } catch (e) {
-    if (e.code === 'ResourceNotFoundException') {
-      return null
+    if (e.code === "ResourceNotFoundException") {
+      return null;
     }
-    throw e
+    throw e;
   }
-}
+};
 
 /**
  * Delete Lambda function
  * @param {*} param0
  */
-const deleteLambdaFunction = async (lambda, functionName) => {
+const deleteLambdaFunction = async (lambda, FunctionName) => {
   try {
-    const params = { FunctionName: functionName }
-    await lambda.deleteFunction(params).promise()
+    await lambda.deleteFunction({ FunctionName }).promise();
   } catch (error) {
-    console.log(error)
-    if (error.code !== 'ResourceNotFoundException') {
-      throw error
+    console.log(error);
+    if (error.code !== "ResourceNotFoundException") {
+      throw error;
     }
   }
-}
+};
 
 /**
  * Get AWS IAM role policy
@@ -455,21 +446,21 @@ const deleteLambdaFunction = async (lambda, functionName) => {
  */
 const getPolicy = async ({ name, region, accountId }) => {
   return {
-    Version: '2012-10-17',
+    Version: "2012-10-17",
     Statement: [
       {
-        Action: ['logs:CreateLogStream'],
+        Action: ["logs:CreateLogStream"],
         Resource: [`arn:aws:logs:${region}:${accountId}:log-group:/aws/lambda/${name}:*`],
-        Effect: 'Allow'
+        Effect: "Allow",
       },
       {
-        Action: ['logs:PutLogEvents'],
+        Action: ["logs:PutLogEvents"],
         Resource: [`arn:aws:logs:${region}:${accountId}:log-group:/aws/lambda/${name}:*:*`],
-        Effect: 'Allow'
-      }
-    ]
-  }
-}
+        Effect: "Allow",
+      },
+    ],
+  };
+};
 
 /**
  * Detect if inputs have changed
@@ -478,22 +469,22 @@ const getPolicy = async ({ name, region, accountId }) => {
  */
 const inputsChanged = (prevLambda, lambda) => {
   const keys = [
-    'description',
-    'runtime',
-    'roleArn',
-    'handler',
-    'memory',
-    'timeout',
-    'env',
-    'hash',
-    'securityGroupIds',
-    'subnetIds',
-    'provisionedConcurrency'
-  ]
-  const inputs = pick(keys, lambda)
-  const prevInputs = pick(keys, prevLambda)
-  return not(equals(inputs, prevInputs))
-}
+    "description",
+    "runtime",
+    "roleArn",
+    "handler",
+    "memory",
+    "timeout",
+    "env",
+    "hash",
+    "securityGroupIds",
+    "subnetIds",
+    "provisionedConcurrency",
+  ];
+  const inputs = pick(keys, lambda);
+  const prevInputs = pick(keys, prevLambda);
+  return not(equals(inputs, prevInputs));
+};
 
 /*
  * Removes the Function & Meta Roles from aws according to the provided config
@@ -501,23 +492,23 @@ const inputsChanged = (prevLambda, lambda) => {
  * @param ${object} clients - an object containing aws sdk clients
  * @param ${object} config - the component config
  */
-const removeAllRoles = async (instance, clients) => {
+const removeAllRoles = async ({ state }, clients) => {
   // Delete Function Role
-  if (instance.state.defaultLambdaRoleName) {
-    console.log('Deleting the default Function Role...')
+  if (state.defaultLambdaRoleName) {
+    console.log("Deleting the default Function Role...");
     await clients.extras.removeRole({
-      roleName: instance.state.defaultLambdaRoleName
-    })
+      roleName: state.defaultLambdaRoleName,
+    });
   }
 
   // Delete Meta Role
-  if (instance.state.metaRoleName) {
-    console.log('Deleting the Meta Role...')
+  if (state.metaRoleName) {
+    console.log("Deleting the Meta Role...");
     await clients.extras.removeRole({
-      roleName: instance.state.metaRoleName
-    })
+      roleName: state.metaRoleName,
+    });
   }
-}
+};
 
 /**
  * Get metrics from cloudwatch
@@ -531,41 +522,39 @@ const getMetrics = async (region, metaRoleArn, functionName, rangeStart, rangeEn
    */
 
   // Assume Role
-  const assumeParams = {}
-  assumeParams.RoleSessionName = `session${Date.now()}`
-  assumeParams.RoleArn = metaRoleArn
-  assumeParams.DurationSeconds = 900
+  const assumeParams = {
+    DurationSeconds: 900,
+    RoleArn: metaRoleArn,
+    RoleSessionName: `session${Date.now()}`,
+  };
 
-  const sts = new AWS.STS({ region })
-  const resAssume = await sts.assumeRole(assumeParams).promise()
-
-  const roleCreds = {}
-  roleCreds.accessKeyId = resAssume.Credentials.AccessKeyId
-  roleCreds.secretAccessKey = resAssume.Credentials.SecretAccessKey
-  roleCreds.sessionToken = resAssume.Credentials.SessionToken
+  const sts = new AWS.STS({ region });
+  const { Credentials: { AccessKeyId, SecretAccessKey, SessionToken } = {} } = await sts
+    .assumeRole(assumeParams)
+    .promise();
 
   /**
    * Instantiate a new Extras instance w/ the temporary credentials
    */
 
   const extras = new AWS.Extras({
-    credentials: roleCreds,
-    region
-  })
+    credentials: { AccessKeyId, SecretAccessKey, SessionToken },
+    region,
+  });
 
   const resources = [
     {
-      type: 'aws_lambda',
-      functionName
-    }
-  ]
+      type: "aws_lambda",
+      functionName,
+    },
+  ];
 
   return await extras.getMetrics({
     rangeStart,
     rangeEnd,
-    resources
-  })
-}
+    resources,
+  });
+};
 
 /**
  * Exports
@@ -587,5 +576,5 @@ module.exports = {
   inputsChanged,
   deleteLambdaFunction,
   removeAllRoles,
-  getMetrics
-}
+  getMetrics,
+};

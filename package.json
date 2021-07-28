@@ -1,6 +1,6 @@
 {
   "name": "@serverless/aws-lambda",
-  "version": "1.0.0",
+  "version": "3.2.0",
   "main": "./serverless.js",
   "publishConfig": {
     "access": "public"
@@ -11,6 +11,16 @@
   },
   "author": "Serverless, Inc.",
   "license": "Apache",
+  "prettier": {
+    "arrowParens": "always",
+    "bracketSpacing": true,
+    "printWidth": 120,
+    "singleQuote": false,
+    "semi": true,
+    "tabWidth": 2,
+    "trailingComma": "all",
+    "useTabs": false
+  },
   "devDependencies": {
     "@serverless/platform-client": "^4.2.2",
     "aws-sdk": "^2.640.0",
