@@ -88,7 +88,7 @@ inputs:
   env: # (optional) env vars.
     FOO: BAR
   roleName: plain-name # (optional) custom role name.
-  assumeRolePolicy: # (optional) AssumeRolePolicyStatements
+  assumeRolePolicy: # (optional) Trusted entities
     - Action: sts:AssumeRole
       Effect: Allow
       Principal:
