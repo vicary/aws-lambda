@@ -88,16 +88,13 @@ inputs:
   env: # (optional) env vars.
     FOO: BAR
   roleName: plain-name # (optional) custom role name.
-  resourcePolicy: # (optional) Resource-based policy permission
-    - Effect: Allow
-      Principal: "*"
-      Action: execute-api:Invoke
-      Resource:
-        - execute-api:/*/*/*
-      Condition:
-        IpAddress:
-          aws:SourceIp:
-            - "123.123.123.123"
+  assumeRolePolicy: # (optional) AssumeRolePolicyStatements
+    - Action: sts:AssumeRole
+      Effect: Allow
+      Principal:
+        Service:
+          - lambda.amazonaws.com
+          - secretsmanager.amazonaws.com
   retry: 2 # (optional) async retry configuration. default is 0.
   layers: # (optional) lambda layers to add to this lambda function. default is an empty array.
     - aws:layer:arn:1

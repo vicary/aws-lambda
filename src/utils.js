@@ -49,7 +49,7 @@ const prepareInputs = (
     memory = 1028,
     provisionedConcurrency = 0,
     region = "us-east-1",
-    resourcePolicy,
+    assumeRolePolicy,
     retry = 0,
     roleName,
     runtime = "nodejs12.x",
@@ -74,7 +74,7 @@ const prepareInputs = (
   layers,
   securityGroupIds,
   subnetIds,
-  resourcePolicy,
+  assumeRolePolicy,
   retry,
   provisionedConcurrency,
   aliasName,
@@ -87,7 +87,7 @@ const prepareInputs = (
  * @param ${object} inputs - the component inputs
  * @param ${object} clients - the aws clients object
  */
-const createOrUpdateFunctionRole = async ({ state }, { name, resourcePolicy, roleName }, clients) => {
+const createOrUpdateFunctionRole = async ({ state }, { name, assumeRolePolicy, roleName }, clients) => {
   // Verify existing role, either provided or the previously created default role...
   if (roleName) {
     console.log(`Verifying the provided IAM Role with the name: ${roleName} in the inputs exists...`);
@@ -122,7 +122,10 @@ const createOrUpdateFunctionRole = async ({ state }, { name, resourcePolicy, rol
       service: ["lambda.amazonaws.com"],
       policy: ["arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"],
       // todo; add inline policy for VPC, such as CreateNetworkInterface... etc.
-      assumeRolePolicyDocument: resourcePolicy,
+      assumeRolePolicyDocument: assumeRolePolicy && {
+        Version: "2012-10-17",
+        Statement: assumeRolePolicy,
+      },
     });
 
     state.defaultLambdaRoleName = defaultLambdaRoleName;
